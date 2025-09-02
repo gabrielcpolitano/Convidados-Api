@@ -1,4 +1,5 @@
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
+import cors from 'cors';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { pgTable, text, boolean, timestamp, serial } from 'drizzle-orm/pg-core';
@@ -7,12 +8,17 @@ import { createServer } from "http";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import path from "path";
+import { fileURLToPath } from 'url';
+
+// Para __dirname em ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Drizzle Configuration (for migrations if needed)
 // Run: npx drizzle-kit push --config=inline
 const drizzleConfig = {
   out: "./migrations",
-  dialect: "postgresql" as const,
+  dialect: "postgresql",
   dbCredentials: {
     url: "postgresql://lista_convidados_user:Q2E2ndC3pZrsJ8wwjqQT6A2f1nIYeo6V@dpg-d2r2k7je5dus73cos4mg-a.oregon-postgres.render.com/lista_convidados"
   },
@@ -37,10 +43,6 @@ const loginSchema = z.object({
   password: z.string().min(1, "Senha é obrigatória"),
 });
 
-type InsertGuest = z.infer<typeof insertGuestSchema>;
-type Guest = typeof guests.$inferSelect;
-type LoginData = z.infer<typeof loginSchema>;
-
 // Database Connection
 const databaseUrl = "postgresql://lista_convidados_user:Q2E2ndC3pZrsJ8wwjqQT6A2f1nIYeo6V@dpg-d2r2k7je5dus73cos4mg-a.oregon-postgres.render.com/lista_convidados";
 
@@ -62,28 +64,19 @@ pool.connect().then((client) => {
   console.error("❌ Database connection failed:", error.message);
 });
 
-// Storage Interface
-interface IStorage {
-  getGuest(id: number): Promise<Guest | undefined>;
-  getAllGuests(): Promise<Guest[]>;
-  createGuest(guest: InsertGuest): Promise<Guest>;
-  updateGuestPresence(id: number, present: boolean): Promise<Guest | undefined>;
-  deleteGuest(id: number): Promise<boolean>;
-  searchGuests(searchTerm: string): Promise<Guest[]>;
-}
-
-class DatabaseStorage implements IStorage {
-  async getGuest(id: number): Promise<Guest | undefined> {
+// Storage Class
+class DatabaseStorage {
+  async getGuest(id) {
     const [guest] = await db.select().from(guests).where(eq(guests.id, id));
     return guest || undefined;
   }
 
-  async getAllGuests(): Promise<Guest[]> {
+  async getAllGuests() {
     const allGuests = await db.select().from(guests);
     return allGuests.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async createGuest(insertGuest: InsertGuest): Promise<Guest> {
+  async createGuest(insertGuest) {
     const [guest] = await db
       .insert(guests)
       .values(insertGuest)
@@ -91,7 +84,7 @@ class DatabaseStorage implements IStorage {
     return guest;
   }
 
-  async updateGuestPresence(id: number, present: boolean): Promise<Guest | undefined> {
+  async updateGuestPresence(id, present) {
     const [guest] = await db
       .update(guests)
       .set({ present })
@@ -100,14 +93,14 @@ class DatabaseStorage implements IStorage {
     return guest || undefined;
   }
 
-  async deleteGuest(id: number): Promise<boolean> {
+  async deleteGuest(id) {
     const result = await db
       .delete(guests)
       .where(eq(guests.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
-  async searchGuests(searchTerm: string): Promise<Guest[]> {
+  async searchGuests(searchTerm) {
     const foundGuests = await db
       .select()
       .from(guests)
@@ -120,18 +113,22 @@ const storage = new DatabaseStorage();
 
 // Express App Setup
 const app = express();
+
+// Enable CORS for all origins
+app.use(cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // Logging Middleware
-function log(message: string) {
+function log(message) {
   console.log(`${new Date().toLocaleTimeString()} [express] ${message}`);
 }
 
 app.use((req, res, next) => {
   const start = Date.now();
   const requestPath = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedJsonResponse = undefined;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
@@ -262,19 +259,14 @@ app.get("/api/guests/present", async (req, res) => {
 });
 
 // Error Handler
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err, _req, res, _next) => {
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
   res.status(status).json({ message });
   console.error('Server error:', err);
 });
 
-// Serve static HTML file
-app.use(express.static('.'));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'index.html'));
-});
+// Backend only - no static file serving
 
 // Start Server
 const port = parseInt(process.env.PORT || '5000', 10);
