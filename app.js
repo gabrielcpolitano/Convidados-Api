@@ -161,7 +161,7 @@ app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = loginSchema.parse(req.body);
     
-    if (username === "casamento" && password === "2025") {
+    if (username === "casamento" && password === "1995") {
       res.json({ success: true, message: "Login realizado com sucesso" });
     } else {
       res.status(401).json({ success: false, message: "Credenciais inválidas" });
